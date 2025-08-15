@@ -53,6 +53,8 @@ typedef UINT_PTR uintptr_t;
 #include <sys/stat.h>
 #include <fcntl.h>  // open flags
 #include <sys/utsname.h>
+#include <dirent.h>
+
 
 #ifndef INT16
 #define INT16 short
@@ -72,6 +74,8 @@ HINSTANCE inst;
 HWND wnd;
 HIMC imc;
 ATOM class_atom;
+HICON large_icon = 0;
+HICON small_icon = 0;
 
 static char **main_argv;
 static int main_argc;
@@ -508,7 +512,6 @@ guardpath(string path, int level)
         // if tcgetpgrp / foreground_pid() / foreground_cwd() fails,
         // check for processes $p where /proc/$p/ctty is child_tty()
         // whether the checked filename is below their /proc/$p/cwd
-#include <dirent.h>
         DIR * d = opendir("/proc");
         if (d) {
           char * tty = child_tty();
@@ -1248,19 +1251,59 @@ win_set_scrollview(int pos, int len, int height)
 void
 win_set_icon(char * s, int icon_index)
 {
-  HICON large_icon = 0, small_icon = 0;
+  if (!*s) {
+deficon:
+    // if OSC icon name is empty (!*s)
+    // or icon loading fails (e.g. file not found, from below)
+    // restore default (or configured) icon
+    HICON _large_icon = large_icon;
+    // set the icon
+    SetClassLongPtr(wnd, GCLP_HICONSM, (LONG_PTR)small_icon);
+    SetClassLongPtr(wnd, GCLP_HICON, (LONG_PTR)_large_icon);
+    return;
+  }
 
   char * iconpath = guardpath(s, 1);
   if (iconpath) {
+    // TODO: should we resolve a symbolic link here?
     wstring icon_file = path_posix_to_win_w(iconpath);
     //printf("win_set_icon <%ls>,%d\n", icon_file, icon_index);
     if (icon_file) {
+static HICON large_icon = 0, small_icon = 0;
+      // icon handle management
+      if (large_icon) {
+        DestroyIcon(large_icon);
+        large_icon = 0;
+      }
+      if (small_icon) {
+        DestroyIcon(small_icon);
+        small_icon = 0;
+      }
+
       ExtractIconExW(icon_file, icon_index, &large_icon, &small_icon, 1);
       delete(icon_file);
+
+      if (!large_icon && !small_icon) {
+        // if icon loading fails (e.g. file not found)
+        // restore default (or configured) icon
+        goto deficon;
+      }
+
+      // set the icon
       SetClassLongPtr(wnd, GCLP_HICONSM, (LONG_PTR)small_icon);
       SetClassLongPtr(wnd, GCLP_HICON, (LONG_PTR)large_icon);
+      // or
       //SendMessage(wnd, WM_SETICON, ICON_SMALL, (LPARAM)small_icon);
       //SendMessage(wnd, WM_SETICON, ICON_BIG, (LPARAM)large_icon);
+
+      // according to
+      // https://learn.microsoft.com/is-is/windows/win32/api/winuser/nf-winuser-destroyicon
+      // there is no need to DestroyIcon after ExtractIcon, otherwise 
+      // it should only be called on next call of win_set_icon (#1329);
+      // on the other hand, testing shows that icon handles acquired with 
+      // ExtractIcon do exhaust (#1329), so manage them above
+      //DestroyIcon(large_icon);
+      //DestroyIcon(small_icon);
     }
     free(iconpath);
   }
@@ -4200,7 +4243,8 @@ static struct {
 # ifdef debug_only_input_messages
     if (strstr(wm_name, "MOUSE") || strstr(wm_name, "BUTTON") || strstr(wm_name, "CURSOR") || strstr(wm_name, "KEY"))
 # endif
-    printf("[%d]->%8p %04X %s (%08X %08X)\n", (int)time(0), wnd, message, wm_name, (unsigned)wp, (unsigned)lp);
+    if (strchr(mintty_debug, 'M'))
+      printf("[%d]->%8p %04X %s (%08X %08X)\n", (int)time(0), wnd, message, wm_name, (unsigned)wp, (unsigned)lp);
 #endif
 
   switch (message) {
@@ -4372,7 +4416,8 @@ static struct {
           idm_name = idm_names[i].idm_name;
           break;
         }
-      printf("                           %04X %s\n", (int)wp, idm_name);
+      if (strchr(mintty_debug, 'M'))
+        printf("                           %04X %s\n", (int)wp, idm_name);
 # endif
       if ((wp & ~0xF) >= 0xF000)
         ; // skip WM_SYSCOMMAND from Windows here (but process own ones)
@@ -4812,10 +4857,19 @@ static struct {
     // Try to clear selection when clipboard content is updated (#742)
     when WM_CLIPBOARDUPDATE:
       if (clipboard_token)
+        // skip 1 event to avoid immediate clear-after-copy
         clipboard_token = false;
-      else {
-        term.selected = false;
-        win_update(false);
+      else if (cfg.selection_mode > 1) {
+        if (term.selected && term.selection_eq_clipboard) {
+          term.selection_eq_clipboard = false;
+          win_update(false);
+        }
+      }
+      else if (cfg.selection_mode < 1 || cfg.copy_on_select) {
+        if (term.selected) {
+          term.selected = false;
+          win_update(false);
+        }
       }
       return 0;
 
@@ -4941,6 +4995,9 @@ static struct {
       // and it causes some flickering
       win_adapt_term_size(false, false);
 #endif
+
+    when WM_UNINITMENUPOPUP or WM_EXITMENULOOP:
+      win_key_reset();
 
     when WM_SETFOCUS:
       trace_resize(("# WM_SETFOCUS VK_SHIFT %02X\n", (uchar)GetKeyState(VK_SHIFT)));
@@ -5410,7 +5467,8 @@ static int olddelta;
       DWORD new = ((STYLESTRUCT *)lp)->styleNew;
       DWORD off = old & ~new;
       DWORD on = new & ~old;
-      printf("%sSTYLE%s %08X -> %08X, off %08X on %08X\n", which, what, old, new, off, on);
+      if (strchr(mintty_debug, 'M'))
+        printf("%sSTYLE%s %08X -> %08X, off %08X on %08X\n", which, what, old, new, off, on);
 
 typedef struct {
   DWORD st;
@@ -5893,14 +5951,16 @@ getlxssinfo(bool list, wstring wslname, uint * wsl_ver,
 
   int getlxssdistinfo(bool list, HKEY lxss, wchar * guid)
   {
-    wchar * rootfs;
+    wchar * rootfs = 0;
     wchar * icon = 0;
 
     wchar * bp = getregstr(lxss, guid, W("BasePath"));
     if (!bp)
       return 3;
 
+    wchar * name = getregstr(lxss, guid, W("DistributionName"));
     wchar * pn = getregstr(lxss, guid, W("PackageFamilyName"));
+
     wchar * pfn = 0;
     if (pn) {  // look for installation directory and icon file
       rootfs = newn(wchar, wcslen(bp) + 8);
@@ -5911,9 +5971,50 @@ getlxssinfo(bool list, wstring wslname, uint * wsl_ver,
       pfn = getregstr(package, W("Schemas"), W("PackageFullName"));
       regclose(package);
       regclose(appdata);
-      // "%ProgramW6432%/WindowsApps/<PackageFullName>/images/icon.ico"
+      char * lad = getenv("LOCALAPPDATA");
       char * prf = getenv("ProgramW6432");
-      if (prf && pfn) {
+
+      // check "%LOCALAPPDATA%/Microsoft/WindowsApps/<launcher>.exe"
+      if (lad && pfn) {
+        char * winapps = asform("%s/Microsoft/WindowsApps", lad);
+        // we are looking for the launcher for the selected WSL distro, 
+        // in order to use it as an icon resource file;
+        // we cannot check the installation directory directly 
+        // as it is not readable for normal users, so we do this instead:
+        //
+        // we browse through all *.exe in the user Windows apps folder;
+        // weird enough, launcher names often do not match distro names,
+        // so we determine each launcher shortcut's link target,
+        // then we check whether the PackageFullName is part of the target,
+        // in which case we have found the specific launcher 
+        // and use it as an icon resource file
+        DIR * d = opendir(winapps);
+        if (d) {
+          char * pack = cs__wcstombs(pfn);
+          struct dirent * e;
+          while ((e = readdir(d))) {
+            if (strstr(e->d_name, ".exe")) {
+              char target [MAX_PATH + 1];
+              strcpy(target, "???");
+              char * link = asform("%s/%s", winapps, e->d_name);
+              int ret = readlink (link, target, sizeof (target) - 1);
+              free(link);
+              if (ret > 0) {
+                target [ret] = '\0';
+                if (strstr(target, pack)) {
+                  icon = path_posix_to_win_w(target);
+                  break;
+                }
+              }
+            }
+          }
+          closedir(d);
+          free(winapps);
+        }
+      }
+
+      // check "%ProgramW6432%/WindowsApps/<PackageFullName>/images/icon.ico"
+      if (!icon && prf && pfn) {
         icon = cs__mbstowcs(prf);
         icon = renewn(icon, wcslen(icon) + wcslen(pfn) + 30);
         wcscat(icon, W("\\WindowsApps\\"));
@@ -5925,27 +6026,38 @@ getlxssinfo(bool list, wstring wslname, uint * wsl_ver,
         // mintty cannot check that here
       }
     }
-    else {  // legacy
-      rootfs = newn(wchar, wcslen(bp) + 8);
-      wcscpy(rootfs, bp);
-      wcscat(rootfs, W("\\rootfs"));
+    else {  // imported or legacy distro
+      // check "%BasePath%/../<Distroname>.exe" launcher
+      char * base = path_win_w_to_posix(bp);
+      char * distname = cs__wcstombs(name);
+      char * launcher = asform("%s/%s.exe", base, distname);
+      free(base);
+      free(distname);
+      if (access(launcher, R_OK) == 0)
+        icon = path_posix_to_win_w(launcher);
+      free(launcher);
 
-      char * rootdir = path_win_w_to_posix(rootfs);
-      struct stat fstat_buf;
-      if (stat (rootdir, & fstat_buf) == 0 && S_ISDIR (fstat_buf.st_mode)) {
-        // non-app or imported deployment
-      }
-      else {
-        // legacy Bash on Windows
-        free(rootfs);
-        rootfs = wcsdup(bp);
-      }
-      free(rootdir);
+      if (!icon) {  // legacy
+        rootfs = newn(wchar, wcslen(bp) + 8);
+        wcscpy(rootfs, bp);
+        wcscat(rootfs, W("\\rootfs"));
 
-      icon = legacy_icon();
+        char * rootdir = path_win_w_to_posix(rootfs);
+        struct stat fstat_buf;
+        if (stat (rootdir, & fstat_buf) == 0 && S_ISDIR (fstat_buf.st_mode)) {
+          // non-app or imported deployment
+        }
+        else {
+          // legacy Bash on Windows
+          free(rootfs);
+          rootfs = wcsdup(bp);
+        }
+        free(rootdir);
+
+        icon = legacy_icon();
+      }
     }
 
-    wchar * name = getregstr(lxss, guid, W("DistributionName"));
 #ifdef use_wsl_getdistconf
     // this has currently no benefit, and it does not work in 32-bit cygwin
     if (pWslGetDistributionConfiguration) {
@@ -7020,6 +7132,11 @@ main(int argc, char *argv[])
   }
   if (getenv("MINTTY_TABBAR")) {
     cfg.tabbar = max(cfg.tabbar, atoi(getenv("MINTTY_TABBAR")));
+    unsetenv("MINTTY_TABBAR");
+  }
+  if (getenv("MINTTY_SYNC")) {
+    cfg.geom_sync = max(cfg.geom_sync, atoi(getenv("MINTTY_SYNC")));
+    unsetenv("MINTTY_SYNC");
   }
 #ifndef support_horizontal_scrollbar_with_tabbar
   if (cfg.tabbar)
@@ -7058,49 +7175,74 @@ main(int argc, char *argv[])
 
 #define dont_debug_wsl
 
-  bool wslbridge2 = access("/bin/wslbridge2", X_OK) == 0
-                 || access("/bin/wslbridge", X_OK) < 0;
+  int wslbridge = cfg.wslbridge;
+  if (wslbridge == 2 && access("/bin/wslbridge2", X_OK) < 0)
+    wslbridge = 1;
+  if (wslbridge == 1 && access("/bin/wslbridge", X_OK) < 0)
+    wslbridge = 0;
+
+  if (support_wsl && !wslbridge) {
+    setenv("HOSTTERM", cfg.term, true);
+    setenv("HOSTLANG", getlocenvcat("LC_CTYPE"), true);
+    char * envs_to_wsl_exe = getenv("WSLENV");
+    if (envs_to_wsl_exe)
+      envs_to_wsl_exe = asform("%s::HOSTTERM::HOSTLANG");
+    else
+      envs_to_wsl_exe = "HOSTTERM::HOSTLANG";
+    setenv("WSLENV", envs_to_wsl_exe, true);
+  }
 
   // Work out what to execute.
   argv += optind;
   if (wsl_guid && wsl_launch) {
     argc -= optind;
     char * cmd0;
-    if (wslbridge2) {
+    if (wslbridge == 2) {
 # ifndef __x86_64__
       argc += 2;  // -V 1/2
 # endif
       cmd = "/bin/wslbridge2";
       cmd0 = "-wslbridge2";
     }
-    else {
+    else if (wslbridge == 1) {
       cmd = "/bin/wslbridge";
       cmd0 = "-wslbridge";
     }
-    bool login_dash = false;
+    else {
+      cmd = "wsl";
+      cmd0 = "-wsl";
+    }
+    bool login_shell = false;
     if (*argv && !strcmp(*argv, "-") && !argv[1]) {
-      login_dash = true;
+      login_shell = true;
       argv++;
       //argc--;
       //argc++; // for "-l"
+      if (!wslbridge)
+        argc++;
     }
-    if (wslbridge2)
+    if (wslbridge != 1)
       argc += start_home;
-    argc += 10;  // -e parameters
+    if (wslbridge)
+      argc += 10;  // -e parameters
 
-    char ** new_argv = newn(char *, argc + 8 + start_home + (wsltty_appx ? 2 : 0));
+    char ** new_argv = newn(char *, argc + 10 + start_home + (wsltty_appx ? 2 : 0));
     char ** pargv = new_argv;
-    if (login_dash) {
+    if (login_shell) {
       *pargv++ = cmd0;
 #ifdef wslbridge_supports_l
 #warning redundant option wslbridge -l not needed
       *pargv++ = "-l";
 #endif
+      if (!wslbridge) {
+        *pargv++ = "--shell-type";
+        *pargv++ = "login";
+      }
     }
     else
       *pargv++ = cmd;
 # ifndef __x86_64__
-    if (wslbridge2) {
+    if (wslbridge == 2) {
       *pargv++ = "-V";
       if (wsl_ver > 1)
         *pargv++ = "2";
@@ -7109,7 +7251,7 @@ main(int argc, char *argv[])
     }
 # endif
     if (*wsl_guid) {
-      if (wslbridge2) {
+      if (wslbridge != 1) {
         if (*wslname) {
           *pargv++ = "-d";
           *pargv++ = cs__wcstombs(wslname);
@@ -7123,31 +7265,38 @@ main(int argc, char *argv[])
 #ifdef wslbridge_t
     *pargv++ = "-t";
 #endif
-#ifdef propagate_TERM_to_WSL
-    *pargv++ = "-e";
-    *pargv++ = "TERM";
-#else
-    setenv("HOSTTERM", cfg.term, true);
-    *pargv++ = "-e";
-    *pargv++ = "HOSTTERM";
-#endif
-    *pargv++ = "-e";
-    *pargv++ = "APPDATA";
-    if (!cfg.old_locale) {
+
+    // propagate environment variables
+    if (wslbridge) {
+      setenv("HOSTTERM", cfg.term, true);
+      setenv("HOSTLANG", getlocenvcat("LC_CTYPE"), true);
       *pargv++ = "-e";
-      *pargv++ = "LANG";
+      *pargv++ = "HOSTTERM";
       *pargv++ = "-e";
-      *pargv++ = "LC_CTYPE";
+      *pargv++ = "HOSTLANG";
       *pargv++ = "-e";
-      *pargv++ = "LC_ALL";
+      *pargv++ = "APPDATA";
+      if (!cfg.old_locale) {
+        *pargv++ = "-e";
+        *pargv++ = "LANG";
+        *pargv++ = "-e";
+        *pargv++ = "LC_CTYPE";
+        *pargv++ = "-e";
+        *pargv++ = "LC_ALL";
+      }
     }
+
     if (start_home) {
-      if (wslbridge2) {
+      if (wslbridge == 2) {
         *pargv++ = "--wsldir";
         *pargv++ = "~";
       }
-      else
+      else if (wslbridge == 1)
         *pargv++ = "-C~";
+      else {
+        *pargv++ = "--cd";
+        *pargv++ = "~";
+      }
     }
 
 #if CYGWIN_VERSION_API_MINOR >= 74
@@ -7186,9 +7335,9 @@ main(int argc, char *argv[])
 # endif
     }
 
-    if (wsltty_appx && lappdata && *lappdata) {
+    if (wsltty_appx && wslbridge && lappdata && *lappdata) {
       char * wslbridge_backend;
-      if (wslbridge2) {
+      if (wslbridge == 2) {
         wslbridge_backend = asform("%s/wslbridge2-backend", lappdata);
         copyfile("/bin/wslbridge2-backend", wslbridge_backend, true);
       }
@@ -7208,6 +7357,7 @@ main(int argc, char *argv[])
     *pargv = 0;
     argv = new_argv;
 #ifdef debug_wsl
+    printf("argc %d\n", argc);
     while (*new_argv)
       printf("<%s>\n", *new_argv++);
 #endif
@@ -7257,7 +7407,8 @@ main(int argc, char *argv[])
   }
 
   // Load icon if specified.
-  HICON large_icon = 0, small_icon = 0;
+  // icon variables are now global for use as fallback in win_set_icon
+  //HICON large_icon = 0, small_icon = 0;
   if (*cfg.icon) {
     //string icon_file = strdup(cfg.icon);
     // could use path_win_w_to_posix(cfg.icon) to avoid the locale trick below
@@ -7395,6 +7546,10 @@ main(int argc, char *argv[])
     }
   }
 
+  // Load icon from resource if none configured
+  if (!large_icon)
+    large_icon = LoadIcon(inst, MAKEINTRESOURCE(IDI_MAINICON));
+
   // The window class.
   class_atom = RegisterClassExW(&(WNDCLASSEXW){
     .cbSize = sizeof(WNDCLASSEXW),
@@ -7403,7 +7558,7 @@ main(int argc, char *argv[])
     .cbClsExtra = 0,
     .cbWndExtra = 0,
     .hInstance = inst,
-    .hIcon = large_icon ?: LoadIcon(inst, MAKEINTRESOURCE(IDI_MAINICON)),
+    .hIcon = large_icon,
     .hIconSm = small_icon,
     .hCursor = LoadCursor(null, IDC_IBEAM),
     .hbrBackground = null,

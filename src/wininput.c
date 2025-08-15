@@ -161,17 +161,25 @@ append_commands(HMENU menu, wstring commands, UINT_PTR idm_cmd, bool add_icons, 
       MENUITEMINFOW mi;
       mi.cbSize = sizeof(MENUITEMINFOW);
       mi.fMask = MIIM_BITMAP;
+
       wchar * params = cs__utftowcs(paramp);
       wstring iconfile = wslicon(params);  // default: 0 (no icon)
       free(params);
       HICON icon;
-      if (iconfile)
-        icon = (HICON) LoadImageW(0, iconfile,
-                                  IMAGE_ICON, 0, 0,
-                                  LR_DEFAULTSIZE | LR_LOADFROMFILE
-                                  | LR_LOADTRANSPARENT);
+      if (iconfile) {
+#include <shellapi.h>
+        int iflen = wcslen(iconfile);
+        if (iflen > 4 && 0 == wcscmp(iconfile + iflen - 4, W(".exe")))
+          ExtractIconExW(iconfile, 0, &icon, 0, 1);
+        else
+          icon = (HICON) LoadImageW(0, iconfile,
+                                    IMAGE_ICON, 0, 0,
+                                    LR_DEFAULTSIZE | LR_LOADFROMFILE
+                                    | LR_LOADTRANSPARENT);
+      }
       else
         icon = LoadIcon(inst, MAKEINTRESOURCE(IDI_MAINICON));
+
       HBITMAP bitmap = icon_bitmap(icon);
       mi.hbmpItem = bitmap;
       SetMenuItemInfoW(menu, idm_cmd + n, 0, &mi);
@@ -1750,6 +1758,19 @@ toggle_tabbar()
     win_close_tabbar();
 }
 
+static void
+toggle_reverse_video()
+{
+  term.rvideo = !term.rvideo;
+  win_invalidate_all(false);
+}
+
+static uint
+mflags_reverse_video()
+{
+  return term.rvideo ? MF_CHECKED : MF_UNCHECKED;
+}
+
 static void hor_left_1() { horscroll(-1); }
 static void hor_right_1() { horscroll(1); }
 static void hor_out_1() { horsizing(1, false); }
@@ -1861,6 +1882,7 @@ static struct function_def cmd_defs[] = {
   {"refresh", {.fct = refresh}, 0},
   {"toggle-dim-margins", {.fct = toggle_dim_margins}, mflags_dim_margins},
   {"toggle-status-line", {.fct = toggle_status_line}, mflags_status_line},
+  {"toggle-reverse-video", {.fct = toggle_reverse_video}, mflags_reverse_video},
 
   {"super", {.fct_key = super_down}, 0},
   {"hyper", {.fct_key = hyper_down}, 0},
@@ -2890,6 +2912,7 @@ C	M	+C	+A	"	"
       }
       //printf("->sel %d:%d .. %d:%d\n", term.sel_start.y, term.sel_start.x, term.sel_end.y, term.sel_end.x);
       term.selected = true;
+      term.selection_eq_clipboard = false;
       win_update(true);
     }
     if (selection_pending)
@@ -3243,6 +3266,13 @@ C	M	+C	+A	"	"
     len = sprintf(buf, mods ? "\e[%i;%u~" : "\e[%i~", code, mods + 1);
   }
   void other_code(wchar c) {
+#if CYGWIN_VERSION_API_MINOR >= 74
+    bool iscap = shift ^ (GetKeyState(VK_CAPITAL) & 1);
+    if (iscap)
+      c = towupper(c);
+    else
+      c = towlower(c);
+#endif
     trace_key("other");
     if (cfg.format_other_keys)
       // xterm "formatOtherKeys: 1": CSI 64 ; 2 u
@@ -3480,11 +3510,39 @@ static struct {
       if (mods & MDK_SHIFT) {
         kbd[VK_SHIFT] = 0;
         wc = undead_keycode();
+#ifdef debug_key
+        printf("modf - SHFT -> %04X\n", wc);
+#endif
       }
     }
 #ifdef debug_key
     printf("modf wc %04X (ctrl %d key %02X)\n", wc, ctrl, key);
 #endif
+
+    if (!wc && (
+                   (key >= 'A' && key <= 'Z')
+                || (key >= VK_OEM_1 && key <= VK_OEM_102)
+               )
+       )
+    {
+      // support right-Alt if AltGr unmapped (#1108)
+      // like without modifyOtherKeys mode
+      if (mods & MDK_CTRL) {
+        // determine non-ASCII letters
+        kbd[VK_CONTROL] = 0;
+        wc = undead_keycode();
+#ifdef debug_key
+        printf("modf - CTRL -> %04X\n", wc);
+#endif
+      }
+
+      if (altgr) {
+        // turn AltGr into Alt
+        mods |= MDK_ALT;
+        altgr = false;
+      }
+    }
+
     if (wc) {
       if (altgr && !is_key_down(VK_LMENU))
         mods &= ~ MDK_ALT;
@@ -3899,6 +3957,7 @@ static struct {
       if (!layout())
         return false;
     otherwise:
+      trace_key("other");
       if (!layout())
         return false;
   }

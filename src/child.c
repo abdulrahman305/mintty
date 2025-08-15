@@ -1,5 +1,5 @@
 // child.c (part of mintty)
-// Copyright 2008-11 Andy Koppe, 2015-2022 Thomas Wolff
+// Copyright 2008-11 Andy Koppe, 2015-2025 Thomas Wolff
 // Licensed under the terms of the GNU General Public License v3 or later.
 
 #include "child.h"
@@ -156,6 +156,25 @@ open_logfile(bool toggling)
         gettimeofday(& now, 0);
         char * logf = newn(char, MAX_PATH + 1);
         strftime(logf, MAX_PATH, log, localtime (& now.tv_sec));
+        free(log);
+        log = logf;
+      }
+      // also expand placeholders $h or $p with hostname or pid
+      if ((format = strstr(log, "$h"))) {
+#ifndef HOST_NAME_MAX
+#define HOST_NAME_MAX 255
+#endif
+        char hostname[HOST_NAME_MAX + 1];
+        if (0 == gethostname(hostname, HOST_NAME_MAX)) {
+          *format = '%'; *++format = 's';
+          char * logf = asform(log, hostname);
+          free(log);
+          log = logf;
+        }
+      }
+      if ((format = strstr(log, "$p"))) {
+        *format = '%'; *++format = 'd';
+        char * logf = asform(log, getpid());
         free(log);
         log = logf;
       }
@@ -1198,6 +1217,7 @@ setup_sync(bool in_tabs)
     }
     if (cfg.tabbar) {
       setenvi("MINTTY_TABBAR", cfg.tabbar);
+      setenvi("MINTTY_SYNC", cfg.geom_sync);
       // enforce proper grouping, i.e. either new tab or window, as requested
       if (in_tabs && *cfg.class) {
         char * class = cs__wcstoutf(cfg.class);
@@ -1411,6 +1431,8 @@ child_fork(int argc, char *argv[], int moni, bool config_size, bool in_cwd, bool
 void
 child_launch(int n, int argc, char * argv[], int moni)
 {
+  setup_sync(true);
+
   if (*cfg.session_commands) {
     char * cmds = cs__wcstombs(cfg.session_commands);
     char * cmdp = cmds;

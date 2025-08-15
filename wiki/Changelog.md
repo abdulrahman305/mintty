@@ -1,12 +1,56 @@
+WSL support
+  * Set up HOSTERM, HOSTLANG only if launching WSL.
+
+Desktop integration
+  * Reestablish small icon support (dropped in 3.7.9) (#1329).
+  * Restore default/configured icon on invalid icon change sequence.
+  * Support many dynamic icon changes by handle resource management (#1329).
+
+### 3.7.9 (10 August 2025) ###
+
 Terminal features
   * Fix darkmode/wakeup refresh to not override dynamic OSC colour settings.
   * Fix emoji invisible and blinking attributes.
   * Accept (but ignore) XTMODKEYS subparameters (xterm 398).
   * Fix doubled underline (since 3.7.8).
   * Avoid repetitive painting of images.
+  * Fix selection highlighting in configured colours on emojis.
+  * Full or dimmed selection highlighting depending on clipboard contents (#1322).
+  * Fix GR-mapped character sets in locking shift mode (vttest 3.10.).
+  * Indicate enabled OSC 52 in primary DA response (#1324).
+  * Fix OSC 52 response clipboard indication (#1327).
+  * Fix emoji background in reverse mode.
+
+Character handling
+  * Workaround (for cygwin 3.6.4) for non-BMP characters in UTF-8 mode (#1325, #1326).
+  * Emoji icons are also looked up in /usr/share/emojis, to support common package deployment.
+
+Keyboard handling
+  * Avoid sticky Ctrl state also after closing menu (~#1273, ~#1266).
+  * Support modifier combinations with right-Alt in modifyOtherKeys mode (#1108).
+  * Adapt character code to Shift state in modifyOtherKeys mode (xterm).
+
+WSL support
+  * New mode to run WSL directly with Windows default access gateway wsl.exe.
+  * Drop wslbridge gateways by default.
+  * Derive default icon from WSL launcher shortcut (mintty/wsltty#110).
+  * Fix WSL icons in session launcher menu entries, also extracted from WSL launchers.
+
+Window handling
+  * Integrate sessions launched from session launcher into tab set.
+
+Documentation
+  * Manual and wiki Tips: sections on tab session management (~#1284, ~#1201).
+  * Manual and wiki Tips: enhanced description of WSL support.
+  * Manual and wiki: enhanced description of text layout (reflow and bidi).
 
 Configuration
   * Changing default setting UnderlineManual=true for consistent line placement.
+  * New option WSLbridge, default 0 to use wsl.exe to launch WSL.
+  * New option SelectionMode.
+  * New user-definable function toggle-reverse-video.
+  * Logfile placeholders $h or $p are replaced with hostname or process ID.
+  * Enable logging toggling by default: Log=mintty.$h.%Y-%m-%d_%H-%M-%S.$p.log Logging=no (~#1167).
 
 ### 3.7.8 (22 March 2025) ###
 

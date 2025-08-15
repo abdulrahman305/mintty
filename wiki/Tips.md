@@ -186,12 +186,51 @@ installed, mintty can be called from cygwin to run a WSL terminal session:
 * `mintty --WSL=Ubuntu`
 * `mintty --WSL` (for the Default distribution as set with `wslconfig /s` or `wsl -s`)
 
-Note, the `wslbridge2` gateways need to be installed in `/bin` for this purpose 
-(see below for details). (Fallback to legacy wslbridge on older Windows is supported.)
-
 A WSL terminal session can be configured for the mintty session launcher 
 in the config file, like:
 * `SessionCommands=Ubuntu:--WSL=Ubuntu`
+
+### WSL support ###
+
+As also described in the manual, mintty adapts certain features 
+for WSL interaction:
+* Cygwin CJK extensions of locale modifiers are not applied.
+* Pathname handling for OSC 7 directory cloning.
+* Pathname transformation for copy/paste and file link opening.
+* Setup of configuration directories and files.
+* Terminal types for Options menu are offered as they exist on WSL.
+* Shortcut start directory fallback handling.
+* Handling of option GuardNetworkPaths.
+* Handling of option ExitCommands..
+* Handling of option DropCommands..
+* Handling of option UserCommands..
+* Display of start or exit error messages.
+* Handling of foreground working directory.
+
+Mintty adjusts its icon (including in the session launcher) according 
+to the selected WSL distribution.
+
+Mintty can adjust taskbar grouping as well as tab set grouping to 
+your preferences, for example:
+* `Class=wsl-class-%5$s` to group sessions of each WSL distribution
+
+or
+* `AppID=@` to group WSL sessions automatically
+
+### WSL sessions ###
+
+Option `WSLbridge` selects the WSL launcher / bridge gateway to be used.
+The `wslbridge2` or older `wslbridge` gateways need to be installed in 
+`/bin` for this purpose (see below for details).
+
+With 3.7.9, however, mintty supports WSL sessions out of the box, 
+dropping the wslbridge gateways by default, since there were 
+notoriously frequent cases where they would have failed to work.
+Launching WSL with the Windows built-in default launcher, however, 
+used to be a crook solution as it obstructed transparent terminal operation 
+by hooking the Windows \fIconhost\fP layer into the workflow.
+This deficiency can now be compensated by patching an updated `conhost.exe` 
+into Windows; see instructions about `conhost` further below.
 
 ### WSLtty, the standalone WSL mintty terminal ###
 
@@ -199,14 +238,14 @@ For a standalone mintty deployment as a WSL terminal, also providing
 desktop and start menu shortcuts, command line launch scripts, and 
 optional Windows Explorer integration, install 
 [wsltty](https://github.com/mintty/wsltty),
-using either the wsltty installer, a Chocolatey package, or a Windows Appx package.
+using various installation options listed there.
 
-### Manual setup of WSL terminal ###
+### Manual setup of a WSL launcher / bridge gateway ###
 
 To help reproduce the installation manually, for users of cygwin or msys2:
 * Download from the https://github.com/Biswa96/wslbridge2 repository
 * Install package dependencies `make`, `g++`, `linux-headers` in WSL
-* Build the wslbridge2 gateways with
+* Build the wslbridge2 client and server gateways with
   * `make RELEASE=1` for the frontends (e.g. from cygwin)
   * `wsl make RELEASE=1` or `wsl -d` _distro_ `make RELEASE=1` for the backends
 * From subdirectory `bin`, install the gateway tools `wslbridge2.exe` and `wslbridge2-backend` into your `/bin` directory
@@ -350,9 +389,14 @@ as distributed with the Windows Terminal project.
 From the [release area](https://github.com/microsoft/terminal/releases), 
 among the Assets, download the WindowsTerminalPreview zip file of your 
 architecture, extract its `OpenConsole.exe`, rename it to `conhost.exe` 
-and replace the conhost program in your Windows System32 folder with it.
-Make a backup copy of conhost.exe first, just in case.
+and replace the conhost program in your Windows System32 folder with it:
+* Make a backup copy of conhost.exe first, just in case.
+* Then remove the original conhost.exe, or rename it as a backup.
+* Then copy the OpenConsole.exe binary to conhost.exe.
+
 (Do **not** copy conhost.exe from Windows 11 into Windows 10.)
+(Do **not** use cygwin `unlink` to remove conhost.exe or you'll need 
+to restore it with Windows explorer.)
 
 ### Mouse interaction in console-based programs ###
 
@@ -985,12 +1029,11 @@ Character width can be modified by a number of configuration or dynamic settings
 * `Font`: may affect CJK ambiguous-width handling if locale support fails
 * `PrintableControls`: makes C1 or C0 control characters visible (width 1)
 * [DECSET 2521](https://github.com/mintty/mintty/wiki/CtrlSeqs#lamalef-joining): renders Arabic LAM/ALEF ligatures in single-cell width
-* [DECSET 2027](https://github.com/mintty/mintty/wiki/CtrlSeqs#emoji-width-mode): 2-cell “emoji width” mode
+* [DECSET 2027](https://github.com/mintty/mintty/wiki/CtrlSeqs#emoji-width-mode): “emoji width” mode, enforcing 2-cell wide emojis
 * [OSC 701](https://github.com/mintty/mintty/wiki/CtrlSeqs#locale): changes locale/charset, may affect ambiguous width handling
 * OSC 50: changes font, may affect ambiguous width handling (with `Locale`)
 * [OSC 77119](https://github.com/mintty/mintty/wiki/CtrlSeqs#wide-characters): turns some character ranges to wide characters
 * [PEC](https://github.com/mintty/mintty/wiki/CtrlSeqs#explicit-character-width): explicit character width attribute
-* [Emoji width mode](https://github.com/mintty/mintty/wiki/CtrlSeqs#emoji-width-mode): forces emojis to double-cell width
 
 See the [mintty manual](http://mintty.github.io/mintty.1.html) and
 [Control Sequences](https://github.com/mintty/mintty/wiki/CtrlSeqs)
@@ -1075,6 +1118,29 @@ support proportional fonts.
 For symbol characters and emojis that are single-width by definition 
 (e.g. locale) but visually double-width, double-width display is supported 
 if the character is followed by an adjacent single-width space character.
+
+
+## Screen text layout and line rendering ##
+
+### Line reflow ###
+
+Mintty automatically readjusts auto-wrap line breaking after resize 
+by default. (This may however spoil image display.)
+
+### Bidi support ###
+
+Mintty support birectional rendering by default, with automatic 
+direction detection (according to the Unicode Bidi algorithm), 
+including support for Arabic joining formatters for Arabic shaping.
+
+It supports additional ECMA-48 bidi modes and private bidi modes to control 
+switchable bidi behaviour per line and partially per paragraph (i.e. within 
+an auto-wrapped line), as listed in the [[CtrlSeqs]] wiki page.
+
+Among those features are optional LAM/ALEF single-cell joining and 
+context-related disabling of bidi autodetection to support 
+box layout with right-to-left text, using Unicode Box Drawing characters 
+or DEC line drawing.
 
 
 ## Font rendering and geometry ##
@@ -1223,6 +1289,8 @@ enforce 2-cell display width of emojis.
 
 Mintty does not bundle actual emoji graphics with its package.
 You will have to download and deploy them yourself.
+Mintty would however use emojis as installed by a distinct package 
+in a subdirectory of /usr/share/emojis.
 Expert options are described here, see also the next section 
 for a Quick Guide to emoji installation.
 
@@ -1258,11 +1326,16 @@ Emoji flags graphics (extending Unicode) can be found at the following sources:
   and extract emoji data (call it without parameters for instructions).
   * Deploy common/*.png into `common`
 
-To “Clone” with limited download volume, use the command `git clone --depth 1`.
-To download only the desired subdirectory from `github.com`, use `subversion`, 
-for example:
+To limit the download size and download the desired subtree only,
+either use subversion, for example:
   * `svn export https://github.com/googlefonts/noto-emoji/trunk/png/128 noto`
   * `svn export https://github.com/iamcal/emoji-data/trunk/img-apple-160 apple`
+or a more complex command combination of git, for example:
+  * `git clone --depth 1 -n --filter=blob:none https://github.com/googlefonts/noto-emoji`
+  * `cd noto-emoji`
+  * `git sparse-checkout set --no-cone png/128`
+  * `git checkout`
+  * `mv png/128 ../noto`
 
 “Deploy” above means move, link, copy or hard-link the respective subdirectory 
 into mintty configuration resource subdirectory `emojis`, e.g.
@@ -1273,6 +1346,14 @@ into mintty configuration resource subdirectory `emojis`, e.g.
 Use your preferred configuration directory, e.g.
 * `cp -rl noto-emoji/png/128 "$APPDATA"/mintty/emojis/noto`
 * `cp -rl noto-emoji/png/128 /usr/share/mintty/emojis/noto`
+
+Note: If the configuration directory is on a network drive 
+(e.g. your home directory may be on a network in enterprise or lab environments),
+loading emoji icons may be noticeably slow. Better deploy them to one 
+of the other options in that case, e.g. $APPDATA/mintty or /usr/share/mintty.
+Deploying into $APPDATA further has the advantage of a common deployment 
+for multiple installations of cygwin, MSYS2, Git-for-Windows, or embedded 
+cygwin-based packages.
 
 ### Quick Guide to emoji installation ###
 
@@ -1436,6 +1517,29 @@ For example to use keys Alt+Win+Left/Right:
 ```
 KeyFunctions=AW+Left:tab-left;AW+Right:tab-right
 ```
+
+### Tab session management ###
+
+To start a tabbed terminal session, simply add command-line parameter 
+`--tabbar`. 
+You may also add that parameter to your desktop or start menu 
+shortcuts to make tabbed experience the default, or achieve the same 
+effect with two settings in the config file:
+```
+TabBar=yes
+SessionGeomSync=2
+```
+
+The shortcut Alt+F2, if invoked within a tab set, will implicitly 
+start the new session within that tab set. (To spawn a new tab set, 
+you can use Alt+Shift+Shift+F2 instead, with both Shift keys held.) 
+The system menu (top-left corner on title bar) gets an additional item 
+New Tab within a tab set. Session invocations from the session 
+launcher in the extended context menu (see manual) are also targeted 
+to the tab set.
+
+Note that hotkey or other software may have remapped some of the 
+function key combinations for other purposes, hiding them from mintty.
 
 
 ## Multi-monitor support ##
@@ -1625,6 +1729,4 @@ checking environment variable `TERM` and the locale variables and invokes
 `stty raw -echo` to enable direct character-based I/O and disable 
 non-compatible signal handling. For this purpose, stty and its library 
 dependencies need to be bundled with the installation as well.
-
-To run WSL, use `wslbridge2` as a gateway (see above).
 

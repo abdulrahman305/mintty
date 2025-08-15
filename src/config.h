@@ -142,6 +142,7 @@ typedef struct {
   // Selection
   bool input_clears_selection;
   bool copy_on_select;
+  char selection_mode;
   bool copy_tabs;
   bool copy_as_rtf;
   char copy_as_html;
@@ -268,6 +269,7 @@ typedef struct {
   string old_options;
   bool dim_margins;
   bool old_xbuttons;
+  int wslbridge;
   // Legacy
   bool use_system_colours;
   bool old_bold;

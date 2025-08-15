@@ -148,6 +148,7 @@ const config default_cfg = {
   // Selection
   .input_clears_selection = true,
   .copy_on_select = true,
+  .selection_mode = 2,
   .copy_tabs = false,
   .copy_as_rtf = true,
   .copy_as_html = 0,
@@ -198,8 +199,8 @@ const config default_cfg = {
   .exit_write = false,
   .exit_title = W(""),
   .icon = W(""),
-  .log = W(""),
-  .logging = true,
+  .log = W("mintty.$h.%Y-%m-%d_%H-%M-%S.$p.log"),
+  .logging = false,
   .create_utmp = false,
   .title = W(""),
   .daemonize = true,
@@ -309,6 +310,7 @@ const config default_cfg = {
   .baud = 0,
   .bloom = 0,
   .old_xbuttons = false,
+  .wslbridge = 0,
   .options_font = W(""),
   .options_fontsize = 0,
   .old_options = ""
@@ -477,6 +479,7 @@ options[] = {
   // Selection
   {"ClearSelectionOnInput", OPT_BOOL, offcfg(input_clears_selection)},
   {"CopyOnSelect", OPT_BOOL, offcfg(copy_on_select)},
+  {"SelectionMode", OPT_BOOL, offcfg(selection_mode)},
   {"CopyTab", OPT_BOOL, offcfg(copy_tabs)},
   {"CopyAsRTF", OPT_BOOL, offcfg(copy_as_rtf)},
   {"CopyAsHTML", OPT_BOOL, offcfg(copy_as_html)},
@@ -616,6 +619,7 @@ options[] = {
   {"StatusLine", OPT_BOOL, offcfg(status_line)},
   {"StatusDebug", OPT_INT, offcfg(status_debug)},
   {"OldXButtons", OPT_BOOL, offcfg(old_xbuttons)},
+  {"WSLbridge", OPT_BOOL, offcfg(wslbridge)},
   {"OptionsFont", OPT_WSTRING, offcfg(options_font)},
   {"OptionsFontSize", OPT_INT | OPT_LEGACY, offcfg(options_fontsize)},
   {"OptionsFontHeight", OPT_INT, offcfg(options_fontsize)},
@@ -1192,6 +1196,7 @@ matchconf(char * conf, char * item)
 
 static string * config_dirs = 0;
 static int last_config_dir = -1;
+static char * config_emojis = 0;
 
 static void
 init_config_dirs(void)
@@ -1199,15 +1204,20 @@ init_config_dirs(void)
   if (config_dirs)
     return;
 
-  int ncd = 3;
+  int ncd = 4;
   char * appdata = getenv("APPDATA");
   if (appdata)
     ncd++;
   if (config_dir)
     ncd++;
   config_dirs = newn(string, ncd);
+  // init indication whether config dirs have emojis to unknown
+  config_emojis = newn(char, ncd);
+  for (int i = 0; i < ncd; i++)
+    config_emojis[i] = -1;
 
   // /usr/share/mintty , $APPDATA/mintty , ~/.config/mintty , ~/.mintty
+  config_dirs[++last_config_dir] = "/usr/share";  // for "/emojis" only
   config_dirs[++last_config_dir] = "/usr/share/mintty";
   if (appdata) {
     appdata = newn(char, strlen(appdata) + 8);
@@ -1232,7 +1242,22 @@ get_resource_file(wstring sub, wstring res, bool towrite)
 {
   init_config_dirs();
   int fd;
-  for (int i = last_config_dir; i >= 0; i--) {
+
+  bool lookup_emojis = 0 == wcscmp(W("emojis"), sub);
+  // also look up emojis in /usr/share/emojis
+  int base = !lookup_emojis;  // base = 0 to look up emojis, 1 otherwise
+  // emojis loading shortcut:
+  // when we look up for emojis in one of the resource directories 
+  // for the first time, we check whether an emojis subdirectory exists 
+  // (the requested resource is checked first and the flag set then),
+  // so we can later skip those config directories that don't have emojis, 
+  // noticeably reducing delay in case the config is on a network drive
+
+  for (int i = last_config_dir; i >= base; i--) {
+    if (config_emojis[i] == 0)
+      // skip if config dir has been checked to not contain emojis
+      continue;
+
     wchar * rf = path_posix_to_win_w(config_dirs[i]);
     int len = wcslen(rf);
     rf = renewn(rf, len + wcslen(sub) + wcslen(res) + 3);
@@ -1260,11 +1285,30 @@ get_resource_file(wstring sub, wstring res, bool towrite)
     }
 #endif
     if (fd >= 0) {
+      if (lookup_emojis)
+        config_emojis[i] = 1;
       close(fd);
       return resfn;
     }
+    int errno_code = errno;
     free(resfn);
-    if (errno == EACCES || errno == EEXIST)
+
+#if CYGWIN_VERSION_API_MINOR >= 194
+    if (lookup_emojis && config_emojis[i] == -1) {
+      // check and remember whether config directory has subdirectory emojis
+      char * emojis_dir = asform("%s/emojis", config_dirs[i]);
+      int fd = open(emojis_dir, O_DIRECTORY);
+      if (fd >= 0) {
+        config_emojis[i] = 1;
+        close(fd);
+      }
+      else
+        config_emojis[i] = 0;
+      free(emojis_dir);
+    }
+#endif
+
+    if (errno_code == EACCES || errno_code == EEXIST)
       break;
   }
   return null;
@@ -2042,7 +2086,12 @@ do_file_resources(control *ctrl, wstring pattern, bool list_dirs, str_fn fnh)
   init_config_dirs();
   //printf("add_file_resources <%ls> dirs %d\n", pattern, list_dirs);
 
-  for (int i = last_config_dir; i >= 0; i--) {
+  int base = 1;
+  bool lookup_emojis = 0 == wcsncmp(W("emojis/"), pattern, 7);
+  if (lookup_emojis)
+    base = 0;  // also consider distinct emojis packages in /usr/share/emojis
+
+  for (int i = last_config_dir; i >= base; i--) {
 #ifdef use_findfile
     (void)fnh;  // CYGWIN_VERSION_API_MINOR < 74
 
@@ -2468,6 +2517,7 @@ bellfile_handler(control *ctrl, int event)
 }
 
 static control * theme = null;
+static control * dheme = null;
 static control * store_button = null;
 
 static void
@@ -2870,15 +2920,28 @@ scheme_return:
 static void
 theme_handler(control *ctrl, int event)
 {
-  //__ terminal theme / colour scheme
-  const wstring NONE = _W("◇ None ◇");  // ♢◇
+  wstring * themeref;
+  wstring * newthemeref;
+  wstring NONE;
+  if (ctrl->context == &new_cfg.theme_file) {
+    newthemeref = &new_cfg.theme_file;
+    themeref = &cfg.theme_file;
+    //__ terminal theme / colour scheme
+    NONE = _W("◇ None ◇");  // ♢◇
+  }
+  else {
+    newthemeref = &new_cfg.dark_theme;
+    themeref = &cfg.dark_theme;
+    //__ terminal theme / colour scheme used in dark mode
+    NONE = _W("◇ Same ◇");  // ♢◇
+  }
   const wstring CFG_NONE = W("");
   //__ indicator of unsaved downloaded colour scheme
   const wstring DOWNLOADED = _W("downloaded / give me a name!");
   // downloaded theme indicator must contain a slash
   // to steer enabled state of Store button properly
   const wstring CFG_DOWNLOADED = W("@/@");
-  wstring theme_name = new_cfg.theme_file;
+  wstring theme_name = *newthemeref;
 
   if (event == EVENT_REFRESH) {
     dlg_listbox_clear(ctrl);
@@ -2899,14 +2962,14 @@ theme_handler(control *ctrl, int event)
     else
       dlg_editbox_get_w(ctrl, &theme_name);
 
-    new_cfg.theme_file = theme_name;
+    *newthemeref = theme_name;
     // clear pending colour scheme
     strset(&new_cfg.colour_scheme, "");
     enable_widget(store_button, false);
   }
   else if (event == EVENT_VALCHANGE) {  // pasted or typed-in
     dlg_editbox_get_w(ctrl, &theme_name);
-    new_cfg.theme_file = theme_name;
+    *newthemeref = theme_name;
     enable_widget(store_button,
                   *new_cfg.colour_scheme && *theme_name
                   && !wcschr(theme_name, L'/') && !wcschr(theme_name, L'\\')
@@ -2919,7 +2982,7 @@ theme_handler(control *ctrl, int event)
     if (wcsncmp(W("data:text/plain,"), dragndrop, 16) == 0) {
       // indicate availability of downloaded scheme to be stored
       dlg_editbox_set_w(ctrl, DOWNLOADED);
-      wstrset(&new_cfg.theme_file, CFG_DOWNLOADED);
+      wstrset(newthemeref, CFG_DOWNLOADED);
       // un-URL-escape scheme description
       char * scheme = cs__wcstoutf(&dragndrop[16]);
       char * url = scheme;
@@ -2970,7 +3033,7 @@ theme_handler(control *ctrl, int event)
           // set theme name proposal to url base name
           urlpoi++;
           dlg_editbox_set_w(ctrl, urlpoi);
-          wstrset(&new_cfg.theme_file, urlpoi);
+          wstrset(newthemeref, urlpoi);
           // set scheme
           strset(&new_cfg.colour_scheme, sch);
 
@@ -2986,12 +3049,12 @@ theme_handler(control *ctrl, int event)
     }
     else {
       dlg_editbox_set_w(ctrl, dragndrop);
-      wstrset(&new_cfg.theme_file, dragndrop);
+      wstrset(newthemeref, dragndrop);
       enable_widget(store_button, false);
     }
   }
   // apply changed theme immediately
-  if (strcmp(new_cfg.colour_scheme, cfg.colour_scheme) || wcscmp(new_cfg.theme_file, cfg.theme_file))
+  if (strcmp(new_cfg.colour_scheme, cfg.colour_scheme) || wcscmp(*newthemeref, *themeref))
   {
 #ifdef debug_theme
     printf("theme_handler: apply\n");
@@ -3694,8 +3757,19 @@ setup_config_box(controlbox * b)
   )->column = 2;
   theme = ctrl_combobox(
     //__ Options - Looks:
-    s, _("&Theme"), 80, theme_handler, &new_cfg.theme_file
+    s, _("&Theme"), 75, theme_handler, &new_cfg.theme_file
   );
+#if 0
+#warning
+  // we cannot enable this yet as the effect of downloaded colour schemes 
+  // on theme configuration still needs to be tuned for two themes
+  dheme = ctrl_combobox(
+    //__ Options - Looks:
+    s, _("&Darkmode"), 75, theme_handler, &new_cfg.dark_theme
+  );
+#else
+  (void)dheme;
+#endif
   ctrl_columns(s, 1, 100);  // reset column stuff so we can rearrange them
   ctrl_columns(s, 2, 80, 20);
   //__ Options - Looks: name of web service

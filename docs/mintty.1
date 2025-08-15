@@ -166,6 +166,8 @@ Like \fB\-\-log\fP but with logging initially disabled, so just
 specifying a potential log file name in case logging is enabled from 
 the extended context menu.
 (Equivalent to combining \fB\-\-log\fP with \fB\-o Logging=no\fP.)
+Note that since mintty 3.7.9 a default log file name pattern is preset, 
+which can be overridden with this setting. See option \fBLog\fP.
 
 .TQ
 \fB\-o\fP, \fB\-\-option\fP \fINAME\fP=\fIVALUE\fP
@@ -243,6 +245,7 @@ A window move can still be done with Ctrl+Alt+click-drag.
 Activate tabbar for tab-based session switching among virtual tabs.
 This sets \fBTabBar=1\fP and \fBSessionGeomSync=\fP\fIlevel\fP.
 Without given value the default window synchronization level is 2.
+See section \fBVirtual Tabs\fP below for further features.
 
 .TQ
 \fB\-\-newtabs\fP
@@ -365,26 +368,23 @@ Locale modification (@cjk...) is not set to the environment variables.
 
 .TQ
 \fB\-\-WSL\fP=\fIWSL DISTRIBUTION NAME\fP
-Run a WSL session, setting other parameters as appropriate and involving 
-the \fIwslbridge2\fP gateway implicitly 
-(which should be installed in /bin for this purpose; 
-fallback to legacy wslbridge on older Windows is supported).
+Run a WSL session, set up WSL mode for some features and launch WSL, 
+using a gateway as selected by option \fBWSLbridge\fP, with 
+proper arguments as determined from the selected WSL distribution, 
+in login mode if requested and home directory preference if requested.
+
 If the distribution name is empty, the default WSL installation is run; 
 otherwise, it refers to the installed WSL packages as listed by the 
 Windows tool \fBwslconfig /l\fP or \fBwsl \-l\fP.
 Implies \fB\-\-wsl\fP, \fB\-\-rootfs=\fP...,
 and \fB\-\-icon=\fP... if a respective icon file exists for the distribution.
-Also sets up the gateway to propagate locale settings LANG, LC_CTYPE, LC_ALL 
-and environment variable APPDATA to the WSL session.
 
 .TQ
 \fB\-\-WSLmode\fP=\fIWSL DISTRIBUTION NAME\fP
 Setup a WSL session for the given distribution (like \fB\-\-WSL\fP) but 
 do not actually launch WSL which must be achieved with explicit 
 invocation of a suitable gateway.
-The preferred option is \fB\-\-WSL\fP which invokes \fI/bin/wslbridge2\fP 
-with proper arguments as determined from the selected WSL distribution, 
-in login mode if requested and home directory preference if requested.
+The preferred option is \fB\-\-WSL\fP which also launches WSL.
 
 .TQ
 \fB\-\-rootfs\fP \fIROOTFOLDER\fP
@@ -476,6 +476,7 @@ direction detection (according to the Unicode Bidi algorithm),
 mintty supports ECMA-48 bidi modes and private bidi modes to control 
 switchable bidi behaviour per line and partially per paragraph (i.e. within 
 an auto-wrapped line), as listed in 
+.br
 \fIhttps://github.com/mintty/mintty/wiki/CtrlSeqs#bidirectional\-rendering\fP.
 They follow the current status of the bidi mode model of the 
 \fBBiDi in Terminal Emulators\fP recommendation 
@@ -490,6 +491,12 @@ Mintty considers zero-width joining/non-joining formatters for Arabic shaping.
 Mintty supports a switchable terminal mode so that Arabic LAM/ALEF ligatures 
 are rendered in a single terminal cell.
 See \fIhttps://github.com/mintty/mintty/wiki/CtrlSeqs#lamalef\-joining\fP.
+
+.TQ
+.B Box layout with right-to-left text
+Bidi autodetection would by default spoil boxes formed with Unicode 
+Box Drawing characters or with DEC line drawing. Autodetection disabling 
+escape sequence DECRST 2501 (`\\e[?2501l`) prevents that.
 
 .SS Menus
 
@@ -545,6 +552,12 @@ Shell quoting is added to file names that contain spaces or special characters.
 Selection highlighting is cleared on input by default. This can be disabled
 with option \fBClearSelectionOnInput=false\fP.
 
+Selection highlighting with respect to the clipbaord can be configured with 
+option \fBSelectionMode\fP. Default is full selection highlighting 
+whenever the selection contents is the same as the clipboard contents, 
+dimmed highlighting otherwise. Both copy to clipboard actions and 
+external clipboard changes can affect the highlighting mode.
+
 The current selection size can optionally been indicated with a popup, 
 enabled with option \fBSelectionShowSize\fP.
 
@@ -585,8 +598,9 @@ overridden by the working directory interactively communicated by the
 respective control sequence (OSC\ 7).
 
 Mintty also supports the OSC\ 8 control to embed explicit hyperlinks 
-(similar to links on web pages), 
-see \fIhttps://github.com/mintty/mintty/wiki/CtrlSeqs#hyperlinks\fP.
+(similar to links on web pages), see 
+.br
+\fIhttps://github.com/mintty/mintty/wiki/CtrlSeqs#hyperlinks\fP.
 
 \fINote:\fP While application mouse modes are enabled (as used by many 
 screen oriented applications), \fBCtrl+Shift+click\fP can be used to 
@@ -735,7 +749,9 @@ Matching is case-insensitive and ignores combining characters.
 Shift+cursor-left/right offers another scrolling feature. If prompt lines 
 are marked with scroll markers they navigate to the previous/next prompt, to 
 provide a better orientation among the output of previously invoked commands.
-See the Control Sequences wiki page \fIhttps://github.com/mintty/mintty/wiki/CtrlSeqs#scroll\-markers\fP for details.
+See the Control Sequences wiki page 
+.br
+\fIhttps://github.com/mintty/mintty/wiki/CtrlSeqs#scroll\-markers\fP for details.
 
 .SS Flip screen
 
@@ -787,6 +803,52 @@ achieve a tabbed window behaviour.
 The tabbar can be reordered with user-definable functions tab\-(left|right) 
 or interactively via drag-and-drop on the tabs.
 
+.TQ
+.B Tab session management
+Mintty can be launched with tab experience using command-line option 
+\fB\-\-tabbar\fP which can also be added in desktop shortcuts, or the 
+following two settings can be added to the config file to set up 
+tabbed invocation by default:
+.ex
+.br
+TabBar=yes
+.br
+SessionGeomSync=2
+.ee
+
+Within a tab set, \fBAlt+F2\fP will launch the new terminal session 
+in the same tab set.
+See wiki page
+.br
+\fIhttps://github.com/mintty/mintty/wiki/Tips#tab\-session\-management\fP 
+for more details.
+
+.SS WSL support
+
+Mintty supports Windows Subsystem for Linux sessions. See command-line 
+parameter \fB\-\-WSL\fP for invocation.
+
+With 3.7.9, mintty supports WSL sessions out of the box, 
+using the Windows-native wsl.exe gateway to run a WSL session.
+(For older Windows systems, the previous wslbridge gateways can be 
+configured with option \fBWSLbridge\fP.)
+However, for fully transparent application access to all terminal features, 
+a recent version of the Windows conhost layer is needed, as provided 
+by the \fIOpenConsole\fP conhost replacement as described in the Tips 
+wiki page \fIhttps://github.com/mintty/mintty/wiki/Tips\fP.
+(This needs to be patched manually into Windows 11 until the updated 
+version gets released with Windows 11, or into Windows 10.)
+
+Mintty adapts certain features for WSL interaction, particularly 
+pathname handling for copy/paste. See the wiki Tips page for details.
+
+Mintty adjusts its icon (including in the session launcher) according 
+to the selected WSL distribution.
+
+Mintty can adjust taskbar grouping as well as tab set grouping to 
+your preferences, using options \fBClass\fP or \fBAppID\fP.
+Special setting \fBAppID=@\fP groups mintty sessions by each WSL distribution.
+
 .SS Horizontal scrolling of terminal view and horizontal scrollbar
 
 Mintty provides an optional horizontal scrollbar, which can be enabled 
@@ -832,6 +894,7 @@ Note, however, that a BRK can be ignored by configuration of the terminal
 device (pty) or can be ignored by an application by catching the SIGINT signal.
 For more forceful interruption of the terminal client application, 
 see the Tips wiki page 
+.br
 \fIhttps://github.com/mintty/mintty/wiki/Tips#terminating\-the\-foreground\-program\-the\-hard\-way\fP.
 
 Note that Ctrl+C is often configured to raise a SIGINT signal. However, 
@@ -908,6 +971,7 @@ Details: Mintty extracts a list of compose key combinations from the
 current X11 cygwin package, file 
 /usr/share/X11/locale/en_US.UTF-8/Compose, where "Multi_key" 
 combinations can be resolved using key name definitions from 
+.br
 /usr/include/X11/keysymdef.h. For the X11 version used, see the wiki.
 
 .SS Keyboard shortcuts
@@ -1173,8 +1237,11 @@ Tek mode text output supports Unicode.
 Mintty supports display of emojis as defined by Unicode using 
 emoji presentation, emoji style variation and emoji sequences.
 The option \fBEmojis\fP can choose among sets of emoji graphics if 
-deployed in a mintty configuration directory.
-See the Tips wiki page \fIhttps://github.com/mintty/mintty/wiki/Tips#emojis\fP 
+deployed in a mintty configuration directory, or if deployed as 
+common emoji data in \fI/usr/share/emojis\fP.
+See the Tips wiki page 
+.br
+\fIhttps://github.com/mintty/mintty/wiki/Tips#emojis\fP 
 about deployment of emoji graphics for mintty.
 Extended flag emojis (not listed by Unicode) are supported dynamically.
 
@@ -1218,7 +1285,9 @@ Sound files for the bell sound and the audio sound output can be deployed
 in a resource subdirectory \fIsounds\fP or addressed by pathname.
 Tone playing by DECPS is supported via the \fIlibao\fP audio output library 
 if installed. Setting \fBPlayTone\fP can preselect a tone style.
-See the Control Sequences wiki page \fIhttps://github.com/mintty/mintty/wiki/CtrlSeqs#audio\-support\fP.
+See the Control Sequences wiki page 
+.br
+\fIhttps://github.com/mintty/mintty/wiki/CtrlSeqs#audio\-support\fP.
 
 .SS Diagnostic support
 
@@ -1229,6 +1298,8 @@ A couple of options are available to enable logging initially
 a log file name for later logging (\fBLog=...\fP combined with \fBLogging=no\fP, 
 or \fB\-\-logfile ...\fP on the command line).
 In either case, logging can be toggled from the extended context menu.
+Since mintty 3.7.9 a default log file name pattern is preset.
+See option \fBLog\fP for details.
 
 .TQ
 .B Character information display
@@ -1309,6 +1380,8 @@ and localization translation files (option \fBLanguage\fP, subdirectory \fIlang\
 within the mintty resource directories \fI/usr/share/mintty\fP, 
 \fI$APPDATA/mintty\fP, \fI\(ti/.config/mintty\fP, \fI\(ti/.mintty\fP, 
 or as specified with command line option \fB\-\-configdir\fP.
+Emoji icons are additionally looked up in \fI/usr/share/emojis\fP 
+to support common emoji data installed by distinct packages.
 
 The following sections explain the settings on each pane of the options
 dialog, followed by settings that do not appear in the dialog.
@@ -1328,7 +1401,7 @@ Clicking on one of the buttons here opens the colour selection dialog.
 .br
 In the settings (config file or command-line options), colours are 
 represented as comma-separated RGB triples with decimal 8-bit values 
-ranging from 0 to 255. X-style hexadecimal colour specifications such 
+ranging from 0 to 255. X-style hexadecimal\ colour\ specifications such 
 as #RRGGBB, rgb:RR/GG/BB or rgb:RRRR/GGGG/BBBB, 
 cmy:C.C/M.M/Y.Y or cmyk:C.C/M.M/Y.Y/K.K can be used as well.
 Also X11 color names are supported.
@@ -1354,6 +1427,7 @@ The option can also be set to a filename (like D:/.../solarized\-light.minttyrc)
 The field can also be used as a drag-and-drop target for colour schemes 
 downloaded from the Color Scheme Configurator, or for theme files from the web.
 See the Tips wiki page 
+.br
 \fIhttps://github.com/mintty/mintty/wiki/Tips#using\-colour\-schemes\-themes\fP 
 about this mechanism.
 
@@ -1475,6 +1549,7 @@ in this case the bold attribute may not be effective.
 With these settings, up to 10 alternative fonts (and optionally weights) 
 can be configured which would then be selectable via ECMA-48 SGR character attributes 
 (see Tips wiki page 
+.br
 \fIhttps://github.com/mintty/mintty/wiki/Tips#text\-attributes\-and\-rendering\fP).
 .br
 They can also be used as secondary fonts with option \fBFontChoice\fP.
@@ -1624,7 +1699,9 @@ Supported styles are:
 
 Note that all style options only work if the respective emoji graphics repository 
 is deployed in a mintty resource directory, subdirectory \fIemojis\fP.
-See the Tips wiki page \fIhttps://github.com/mintty/mintty/wiki/Tips#emojis\fP 
+See the Tips wiki page 
+.br
+\fIhttps://github.com/mintty/mintty/wiki/Tips#emojis\fP 
 for details.
 
 .TQ
@@ -1866,7 +1943,10 @@ effect, or the locale environment of the shell should be changed accordingly.
 
 \fINote:\fP
 The locale and character set can also be changed with an escape sequence, 
-see the Control Sequences wiki page \fIhttps://github.com/mintty/mintty/wiki/CtrlSeqs#locale\fP.
+see the Control Sequences wiki page 
+.br
+\fIhttps://github.com/mintty/mintty/wiki/CtrlSeqs#locale\fP.
+.br
 That setting takes precedence; changes from the Options menu will silently 
 have no effect unless an escape sequence with empty locale is sent 
 to the terminal to restore to "default".
@@ -2107,6 +2187,19 @@ Settings controlling mouse support.
 \fBCopy on select\fP (CopyOnSelect=yes)
 If enabled, the region selected with the mouse is copied to the clipboard as
 soon as the mouse button is released, thus emulating X Window behaviour.
+
+.TQ
+\fBSelection highlighting mode\fP (SelectionMode=2)
+This option selects how selection highlighting is applied with respect 
+to the clipboard.
+.ul
+.en
+\fB0\fP: selection highlighting is cleared if clipboard gets changed
+.en
+\fB1\fP: cleared by clipboard only if CopyOnSelect is enabled
+.en
+\fB2\fP: local highlighting is dimmed, full highlighting if identical with clipboard
+./ul
 
 .TQ
 \fBCopy with TABs\fP (CopyTab=no)
@@ -2388,7 +2481,9 @@ menus, message boxes, and terminal in-line error messages.
 \fI(language[_region])\fP use the given language or language/region code
 ./ul
 
-See the Tips wiki page \fIhttps://github.com/mintty/mintty/wiki/Tips#localization\fP 
+See the Tips wiki page 
+.br
+\fIhttps://github.com/mintty/mintty/wiki/Tips#localization\fP 
 about how to configure localization.
 
 Note that Windows may already have localized the default entries of the 
@@ -2717,15 +2812,20 @@ For interaction problems of icon, shortcut, and the Windows taskbar,
 see the note for the \-i option above.
 
 .TQ
-\fBLog file\fP (Log=)
+\fBLog file\fP (Log=mintty.$h.%Y-%m-%d_%H-%M-%S.$p.log)
 The \fBLog\fP setting can be used to specify a log file that all output is
-copied into.  If it is empty, as it is by default, no logging is done.
-If it contains \fB%d\fP it will be substituted with the process ID.
+copied into.  If it is empty, no logging is done.
+Since mintty 3.7.9 a default log file name pattern is preset, 
+which creates a log file in the working directory from which mintty was 
+started as soon as logging is enabled from the extended context menu.
+If it contains a single \fB%d\fP it will be substituted with the process ID.
 If it contains \fB%\fP placeholders other than a single \fB%d\fP, 
 the log file name will be constructed by calling strftime(3) on the 
 pattern; note that this is likely to fail if a placeholder expands with 
 "/" (%D).
-Example:
+In addition, placeholders $h or $p will be replaced with the hostname 
+or the process ID respectively.
+Example, using only a timestamp and placing the logs in the home directory:
 .ul
 .ex
 Log=\(ti/mintty.%Y\-%m\-%d_%H\-%M\-%S.log
@@ -2748,9 +2848,10 @@ Note that logging can be toggled from the extended context menu.
 See also the \fIscript\fP(1) utility for a more flexible logging solution.
 
 .TQ
-\fBLogging initially enabled\fP (Logging=yes)
-Disabling this setting disables logging initially.
-If a log file name is specified with \fBLog=...\fP and \fBLogging=no\fP,
+\fBLogging initially enabled\fP (Logging=no)
+This setting selects whether logging is enabled initially.
+If a log file name is specified with \fBLog=...\fP and \fBLogging=no\fP 
+(the default since mintty 3.7.9),
 logging can be enabled (and toggled) from the extended context menu.
 
 .TQ
@@ -2909,7 +3010,9 @@ based on automatic progress detection (according to setting ProgressScan).
 The detected progress will be notified 
 via progress bar in one of three levels 1 (green), 2 (yellow), 3 (red).
 Note that the progress bar can also be switched or even controlled by an 
-escape sequence, see \fIhttps://github.com/mintty/mintty/wiki/CtrlSeqs#progress\-bar\fP.
+escape sequence, see 
+.br
+\fIhttps://github.com/mintty/mintty/wiki/CtrlSeqs#progress\-bar\fP.
 
 .TQ
 \fBShow automatic progress bar\fP (ProgressScan=1)
@@ -2929,8 +3032,9 @@ e.g. of \fIpacman\fP in MSYS2
 
 The detected progress will be notified via progress bar 
 according to option ProgressBar or its dynamic setting.
-Progress scan mode can also be switched by an escape sequence, 
-see \fIhttps://github.com/mintty/mintty/wiki/CtrlSeqs#progress\-bar\fP.
+Progress scan mode can also be switched by an escape sequence, see 
+.br
+\fIhttps://github.com/mintty/mintty/wiki/CtrlSeqs#progress\-bar\fP.
 
 .TQ
 \fBSingle-dash long options\fP (ShortLongOpts=false)
@@ -2972,6 +3076,30 @@ Also there is another escape sequence to disable bidi per screen line.
 .en
 \fB2\fP Enable bidi (default).
 ./ul
+
+.TQ
+\fBWSL launcher/bridge gateway\fP (WSLbridge=0)
+This option selects the launch gateway if running WSL via command-line 
+option \fB\-\-WSL\fP:
+.ul
+.en
+\fB2\fP Use \fI/bin/wslbridge2\fP.
+.en
+\fB1\fP Use \fI/bin/wslbridge\fP (the original WSL bridge gateway, still needed on older Windows versions.
+.en
+\fB0\fP Use Windows \fIwsl.exe\fP.
+./ul
+
+Mintty propagates information about the terminal type and the 
+character encoding (effective LC_CTYPE setting) in the environment variables 
+HOSTTERM and HOSTLANG to the WSL session. It does not propagate TERM or 
+locale variables directly as they may have values that the WSL environment 
+does not support.
+
+The deficiencies of the native wsl.exe gateway should be compensated 
+by patching an updated Windows \fIconhost\fP program into Windows; see 
+.br
+\fIhttps://github.com/mintty/mintty/wiki/Tips#wsl\-sessions\fP for details.
 
 .TQ
 \fBApplication ID\fP (AppID=)
@@ -3408,6 +3536,8 @@ Supported actions are described as follows:
 .en
 \fBtoggle\-status\-line\fP: toggles indicator status line
 .en
+\fBtoggle\-reverse\-video\fP: toggles reverse video mode
+.en
 \fBtoggle\-char\-info\fP: toggles character info display
 .en
 \fBexport\-html\fP (*): exports the screen as an HTML file
@@ -3742,6 +3872,7 @@ After the colour scheme is stored to a colour scheme file, this setting
 is not used anymore.
 
 About this mechanism see the Tips wiki page 
+.br
 \fIhttps://github.com/mintty/mintty/wiki/Tips#using\-colour\-schemes\-themes\fP.
 
 .TQ
@@ -4047,7 +4178,9 @@ key shortcut for menu item selection.
 
 \fINote:\fP The previous command can be detected if prompt lines are marked 
 with the escape sequence ^[[?7711h.
-See the Control Sequences wiki page \fIhttps://github.com/mintty/mintty/wiki/CtrlSeqs#scroll\-markers\fP.
+See the Control Sequences wiki page 
+.br
+\fIhttps://github.com/mintty/mintty/wiki/CtrlSeqs#scroll\-markers\fP.
 
 \fINote:\fP The PATH environment for the external command can be set up 
 with option \fBUserCommandsPath\fP.
@@ -4395,6 +4528,19 @@ Mintty has two \fItermcap\fP or \fIterminfo\fP entries, \fBmintty\fP and
 However, it sets the environment variable \fBTERM\fP to \fBxterm\fP 
 by default in order to provide maximal seamless compatibility also in case 
 of remote login.
+
+.SS WSL interaction
+
+With 3.7.9, mintty supports WSL sessions out of the box, 
+dropping the wslbridge gateways by default, since there were 
+notoriously frequent cases where they would have failed to work.
+Launching WSL with the Windows built-in default launcher, however, 
+used to be a crook solution as it obstructed transparent terminal operation 
+by hooking the Windows \fIconhost\fP layer into the workflow.
+This deficiency can now be compensated by patching an updated \fIconhost.exe\fP 
+into Windows (see also section WSL support above); see 
+.br
+\fIhttps://github.com/mintty/mintty/wiki/Tips#wsl\-sessions\fP for details.
 
 .SS Screen control features, DEC and xterm compatibility
 
