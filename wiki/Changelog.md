@@ -1,11 +1,13 @@
 WSL support
-  * Set up HOSTERM, HOSTLANG only if launching WSL.
+  * Set up HOSTTERM, HOSTLANG only if launching WSL.
+  * Fix WSL session launcher from terminal started from desktop shortcut.
 
 Desktop integration
   * Reestablish small icon support (dropped in 3.7.9) (#1329).
   * Restore default/configured icon on invalid icon change sequence.
   * Support many dynamic icon changes by handle resource management (#1329).
   * Stabilise dynamic icon changes in border cases (~#1329).
+  * Session launcher: support icons for cmd and powershell.
 
 ### 3.7.9 (10 August 2025) ###
 

@@ -1256,10 +1256,8 @@ deficon:
     // if OSC icon name is empty (!*s)
     // or icon loading fails (e.g. file not found, from below)
     // restore default (or configured) icon
-    HICON _large_icon = large_icon;
-    // set the icon
     SetClassLongPtr(wnd, GCLP_HICONSM, (LONG_PTR)small_icon);
-    SetClassLongPtr(wnd, GCLP_HICON, (LONG_PTR)_large_icon);
+    SetClassLongPtr(wnd, GCLP_HICON, (LONG_PTR)large_icon);
     return;
   }
 
@@ -6265,6 +6263,19 @@ wstring
 wslicon(wchar * params)
 {
   wstring icon = 0;  // default: no icon
+
+  char * iconfile = 0;
+  char * systemroot = getenv("SYSTEMROOT");
+  if (systemroot && wcsstr(params, W("-e cmd")))
+    iconfile = asform("%s\\System32\\cmd.exe", systemroot);
+  else if (systemroot && wcsstr(params, W("-e powershell")))
+    iconfile = asform("%s\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", systemroot);
+  if (iconfile) {
+    icon = cs__mbstowcs(iconfile);
+    free(iconfile);
+    return icon;
+  }
+
 #if CYGWIN_VERSION_API_MINOR >= 74
   wchar * wsl = wcsstr(params, W("--WSL"));
   if (wsl) {
