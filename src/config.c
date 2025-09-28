@@ -35,6 +35,7 @@ static wstring rc_filename = 0;
 static char linebuf[444];
 
 wchar * config_log = 0;
+char * keyclick = 0;
 
 
 // all entries need initialisation in options[] or crash...
@@ -132,6 +133,7 @@ const config default_cfg = {
   .key_menu = "",	// VK_APPS
   .key_scrlock = "",	// VK_SCROLL
   .key_commands = W(""),
+  .keyclick = W(""),
   .manage_leds = 7,
   .enable_remap_ctrls = false,
   .old_keyfuncs_keypad = false,
@@ -206,6 +208,7 @@ const config default_cfg = {
   .icon = W(""),
   .log = W("mintty.$h.%Y-%m-%d_%H-%M-%S.$p.log"),
   .logging = false,
+  .log_filter = 1,
   .create_utmp = false,
   .title = W(""),
   .daemonize = true,
@@ -227,7 +230,7 @@ const config default_cfg = {
   .suspbuf_max = 8080,
   .printable_controls = 0,
   .char_narrowing = 75,
-  .emojis = 0,
+  .emojis = EMOJIS_NOTO,
   .emoji_placement = EMPL_STRETCH,
   .save_filename = W("mintty.%Y-%m-%d_%H-%M-%S"),
   .app_id = W(""),
@@ -462,6 +465,7 @@ options[] = {
   {"Break", OPT_STRING | OPT_LEGACY, offcfg(key_break)},
   {"Pause", OPT_STRING | OPT_LEGACY, offcfg(key_pause)},
   {"KeyFunctions", OPT_WSTRING | OPT_KEEPCR, offcfg(key_commands)},
+  {"KeyClick", OPT_WSTRING, offcfg(keyclick)},
   {"ManageLEDs", OPT_INT, offcfg(manage_leds)},
   {"ShootFoot", OPT_BOOL, offcfg(enable_remap_ctrls)},
   {"OldKeyFunctionsKeypad", OPT_BOOL, offcfg(old_keyfuncs_keypad)},
@@ -548,6 +552,7 @@ options[] = {
   {"Icon", OPT_WSTRING, offcfg(icon)},
   {"Log", OPT_WSTRING, offcfg(log)},
   {"Logging", OPT_BOOL, offcfg(logging)},
+  {"LogFilter", OPT_INT, offcfg(log_filter)},
   {"Title", OPT_WSTRING, offcfg(title)},
   {"Utmp", OPT_BOOL, offcfg(create_utmp)},
   {"Window", OPT_WINDOW, offcfg(window)},
@@ -1821,6 +1826,40 @@ fix_config(void)
   cfg.scrollback_lines = min(cfg.scrollback_lines, cfg.max_scrollback_lines);
 }
 
+static void
+post_config(void)
+{
+  if (keyclick)
+    free(keyclick);
+  if (*cfg.keyclick) {
+    wchar * click = wcsdup(cfg.keyclick);
+    if (!wcschr(click, '.')) {
+      int len = wcslen(click);
+      click = renewn(click, len + 5);
+      wcscat(click, W(".wav"));
+    }
+    char * cfn = get_resource_file(W("sounds"), click, false);
+    free(click);
+    if (cfn) {
+      FILE * clickf = fopen(cfn, "r");
+      if (clickf) {
+        struct stat cstat;
+        fstat(fileno(clickf), &cstat);
+        keyclick = malloc(cstat.st_size);
+        fread(keyclick, 1, cstat.st_size, clickf);
+        fclose(clickf);
+
+        // despite preloading the wave sound into memory, initial playback 
+        // suffers from a delay, so we play the sound once here to 
+        // preload the actual audio output and not delay initial key click;
+        // it would be nice to be able to mute this...
+        win_keyclick();
+      }
+      free(cfn);
+    }
+  }
+}
+
 void
 finish_config(void)
 {
@@ -1858,6 +1897,8 @@ finish_config(void)
   if (0 < cfg.transparency && cfg.transparency <= 3)
     cfg.transparency *= 16;
   //printf("finish_config bd %d\n", cfg.bold_as_font);
+
+  post_config();
 }
 
 static void
@@ -2008,6 +2049,8 @@ apply_config(bool save)
     win_invalidate_all(false);
   }
   //printf("apply_config %d bd %d\n", save, cfg.bold_as_font);
+
+  post_config();
 }
 
 
@@ -2564,7 +2607,9 @@ bellfile_handler(control *ctrl, int event)
 
 static control * theme = null;
 static control * dheme = null;
-static control * store_button = null;
+static control * store_button_norm = null;
+static control * store_button_dark = null;
+static bool configure_darkmode = false;
 
 static void
 enable_widget(control * ctrl, bool enable)
@@ -2966,6 +3011,7 @@ scheme_return:
 static void
 old_theme_handler(control *ctrl, int event)
 {
+  control * store_button = store_button_norm;
   wstring * themeref;
   wstring * newthemeref;
   wstring NONE;
@@ -3119,27 +3165,22 @@ theme_handler(control *ctrl, int event)
 
   wstring * newtheme_ref;
   control * theme_widget;
+  control * store_button = store_button_norm;
   wstring NONE;
-#ifndef save_dark_theme
-  newtheme_ref = 0;
-  theme_widget = 0;
-  NONE = 0;
-#endif
-  if (ctrl->context == &new_cfg.theme_file) {
+  if (configure_darkmode || ctrl->context == &new_cfg.dark_theme) {
+    newtheme_ref = &new_cfg.dark_theme;
+    theme_widget = dheme;
+    //__ terminal theme / colour scheme used in dark mode
+    NONE = _W("◇ Same ◇");  // ♢◇
+    if (cfg.config_themes == 2)
+      store_button = store_button_dark;
+  }
+  else {
     newtheme_ref = &new_cfg.theme_file;
     theme_widget = theme;
     //__ terminal theme / colour scheme
     NONE = _W("◇ None ◇");  // ♢◇
   }
-#ifdef save_dark_theme
-#warning need to determine whether to handle normal or dark theme
-  else {
-    newtheme_ref = &new_cfg.dark_theme;
-    theme_widget = dheme;
-    //__ terminal theme / colour scheme used in dark mode
-    NONE = _W("◇ Same ◇");  // ♢◇
-  }
-#endif
 
   const wstring CFG_NONE = W("");
   //__ indicator of unsaved downloaded colour scheme
@@ -3312,11 +3353,30 @@ theme_handler(control *ctrl, int event)
   }
 }
 
+static void
+configure_darkmode_handler(control *ctrl, int event)
+{
+  bool *bp = ctrl->context;
+  if (event == EVENT_REFRESH)
+    dlg_checkbox_set(ctrl, *bp);
+  else if (event == EVENT_VALCHANGE) {
+    *bp = dlg_checkbox_get(ctrl);
+    // reload theme box with respective normal/darkmode theme list
+    theme_handler(configure_darkmode ? dheme : theme, EVENT_REFRESH);
+    // apply selected theme for visual control
+    load_theme(configure_darkmode ? new_cfg.dark_theme : new_cfg.theme_file);
+    win_reset_colours();
+    win_invalidate_all(false);
+  }
+  //printf("configure_darkmode %d\n", configure_darkmode);
+}
+
 #define dont_debug_dragndrop
 
 static void
 old_scheme_saver(control *ctrl, int event)
 {
+  control * store_button = store_button_norm;
   wstring theme_name = new_cfg.theme_file;
   if (event == EVENT_REFRESH) {
     enable_widget(ctrl,
@@ -3368,18 +3428,24 @@ scheme_saver(control *ctrl, int event)
     return;
   }
 
-#ifdef save_dark_theme
-#warning need to determine whether to save normal/dark theme or both
-  wstring * newtheme_ref = &new_cfg.dark_theme;
-  control * theme_widget = dheme;
-#else
-  wstring * newtheme_ref = &new_cfg.theme_file;
-  control * theme_widget = theme;
-#endif
+  wstring * newtheme_ref;
+  control * theme_widget;
+  control * store_button = store_button_norm;
+  if (configure_darkmode || *(char*)ctrl->context == 'd') {
+    newtheme_ref = &new_cfg.dark_theme;
+    theme_widget = dheme;
+    if (cfg.config_themes == 2)
+      store_button = store_button_dark;
+  }
+  else {
+    newtheme_ref = &new_cfg.theme_file;
+    theme_widget = theme;
+  }
 
   wstring theme_spec = *newtheme_ref;
   wstring theme_boxval = newn(wchar, 1);
   dlg_editbox_get_w(theme_widget, &theme_boxval);
+  //printf("theme/scheme cfg <%ls> box <%ls>\n", theme_spec, theme_boxval);
   // the new theme name for a downloaded scheme is either of
   // - a non-empty NAME part of "scheme:NAME;SCHEME" in the box
   // - a non-filename name in the box if the config spec has a "scheme:..."
@@ -3405,13 +3471,14 @@ scheme_saver(control *ctrl, int event)
     if (namend)
       scheme = cs__wcstoutf(namend + 1);
   }
+  //printf("name <%ls> scheme <%s>\n", scheme_name, scheme);
 
   if (event == EVENT_REFRESH) {
     enable_widget(ctrl, scheme_name && scheme);
   }
   else if (event == EVENT_ACTION) {
 #ifdef debug_dragndrop
-    printf("%ls <- <%s>\n", new_cfg.theme_file, new_cfg.colour_scheme);
+    printf("drop name <%ls> scheme <%s>\n", scheme_name, scheme);
 #endif
     // the loaded scheme is stored in the config value
     // but the dialog box may have been typed over, 
@@ -3419,7 +3486,6 @@ scheme_saver(control *ctrl, int event)
     // in order to provide a name for the theme to be saved;
     // so we took (above) the name from the dialog box and the scheme 
     // from either the unchanged dialog box or the config value
-    //printf("name <%ls> scheme <%s>\n", scheme_name, scheme);
     if (scheme_name && scheme) {
       char * sn = get_resource_file(W("themes"), scheme_name, true);
       //printf("save <%ls> to %s\n", scheme_name, sn);
@@ -3479,7 +3545,8 @@ url_opener(control *ctrl, int event)
     wstring url = ctrl->context;
     win_open(wcsdup(url), true);  // win_open frees its argument
   }
-  else if (event == EVENT_DROP) {
+  else if (event == EVENT_DROP && cfg.config_themes != 2) {
+    // forward the drop to theme box if unambiguous
     theme_handler(theme, EVENT_DROP);
   }
 }
@@ -4109,28 +4176,47 @@ setup_config_box(controlbox * b)
     //__ Options - Looks:
     s, _("&Cursor..."), dlg_stdcolour_handler, &new_cfg.cursor_colour
   )->column = 2;
+
+  if (cfg.config_themes == 1) {
+    // initialise configuration selector for dual/switchable theme box
+    configure_darkmode = is_win_dark_mode();
+  }
+  ctrl_columns(s, 1, 100);  // reset column stuff so we can rearrange them
+  ctrl_columns(s, 2, 75, 25);
   theme = ctrl_combobox(
     //__ Options - Looks:
-    s, _("&Theme"), 75, theme_handler, &new_cfg.theme_file
+    s, _("&Theme"), 70, theme_handler, &new_cfg.theme_file
   );
-#if 0
-#warning
-  // we cannot enable this yet as the effect of downloaded colour schemes 
-  // on theme configuration still needs to be tuned for two themes
-  dheme = ctrl_combobox(
-    //__ Options - Looks:
-    s, _("&Darkmode"), 75, theme_handler, &new_cfg.dark_theme
-  );
-#else
-  (void)dheme;
-#endif
+  theme->column = 0;
+  dheme = theme;  // fallback if cfg.config_themes == 1
+  //__ Options - Looks: store colour scheme
+  (store_button_norm = ctrl_pushbutton(s, _("Store"), scheme_saver, ""))
+    ->column = 1;
+  if (cfg.config_themes == 2) {
+    ctrl_columns(s, 1, 100);  // reset column stuff so we can rearrange them
+    ctrl_columns(s, 2, 75, 25);
+    // we cannot enable this yet as the effect of downloaded colour schemes 
+    // on theme configuration still needs to be tuned for two themes
+    dheme = ctrl_combobox(
+      //__ Options - Looks:
+      s, _("&Darkmode"), 70, theme_handler, &new_cfg.dark_theme
+    );
+    dheme->column = 0;
+    //__ Options - Looks: store colour scheme
+    (store_button_dark = ctrl_pushbutton(s, _("Store"), scheme_saver, "d"))
+      ->column = 1;
+  }
   ctrl_columns(s, 1, 100);  // reset column stuff so we can rearrange them
-  ctrl_columns(s, 2, 80, 20);
+  ctrl_columns(s, 3, 30, 60, 10);
+  if (cfg.config_themes == 1) {
+    ctrl_checkbox(
+      //__ Options - Looks: configure dark mode theme
+      s, _("&Darkmode"),
+      configure_darkmode_handler, &configure_darkmode
+    )->column = 0;
+  }
   //__ Options - Looks: name of web service
   ctrl_pushbutton(s, _("Color Scheme Designer"), url_opener, W("http://ciembor.github.io/4bit/"))
-    ->column = 0;
-  //__ Options - Looks: store colour scheme
-  (store_button = ctrl_pushbutton(s, _("Store"), scheme_saver, 0))
     ->column = 1;
 
   s = ctrl_new_set(b, _("Looks"), null, 

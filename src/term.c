@@ -433,6 +433,7 @@ term_reset(bool full)
   term.suspend_update = 0;
   term.no_scroll = 0;
   term.scroll_mode = 0;
+  term.baud = cfg.baud;
 
   term_schedule_search_update();
 
@@ -4172,8 +4173,8 @@ term_paint(void)
                           : win_get_colour(SEL_COLOUR_I);
               if (bg == (colour)-1)
                 bg = eattr.attr & ATTR_REVERSE
-                          ? win_get_colour(BG_COLOUR_I)
-                          : win_get_colour(FG_COLOUR_I);
+                          ? win_get_colour(FG_COLOUR_I)
+                          : win_get_colour(BG_COLOUR_I);
 
               if (cfg.selection_mode > 1) {
                 if (!term.selection_eq_clipboard)

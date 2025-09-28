@@ -3919,6 +3919,27 @@ static float freq_C5_C7[26] =
         term_switch_status(status_line);
       }
     }
+    when CPAIR('*', 'r'): {  /* DECSCS: select communication speed */
+      if (arg0 <= 2)  {
+        if (term.csi_argc == 1)
+          term.baud = cfg.baud;
+        else
+          switch (arg1) {
+            when 0: term.baud = 0;
+            when 1: term.baud = 300;
+            when 2: term.baud = 600;
+            when 3: term.baud = 1200;
+            when 4: term.baud = 2400;
+            when 5: term.baud = 4800;
+            when 6: term.baud = 9600;
+            when 7: term.baud = 19200;
+            when 8: term.baud = 38400;
+            when 9: term.baud = 57600;
+            when 10: term.baud = 76800;
+            when 11: term.baud = 115200;
+          }
+      }
+    }
   }
 
   last_char = 0;  // cancel preceding char for REP
@@ -5163,6 +5184,8 @@ term_do_write(const char *buf, uint len, bool fix_status)
       }
     }
 
+#define accept_multi_ESC_ST true
+
     switch (term.state) {
       when NORMAL: {
         wchar wc;
@@ -5613,6 +5636,10 @@ term_do_write(const char *buf, uint len, bool fix_status)
       when ESCAPE or CMD_ESCAPE:
         if (term.vt52_mode)
           do_vt52(c);
+        else if (c == '\e' && accept_multi_ESC_ST) {
+          if (term.state == ESCAPE)
+            do_ctrl(c);
+        }
         else if (c < 0x20)
           do_ctrl(c);
         else if (c < 0x30) {
@@ -5889,7 +5916,9 @@ term_do_write(const char *buf, uint len, bool fix_status)
         }
 
       when DCS_ESCAPE:
-        if (c < 0x20) {
+        if (c == '\e' && accept_multi_ESC_ST) {
+        }
+        else if (c < 0x20) {
           do_ctrl(c);
           term.state = NORMAL;
         } else if (c < 0x30) {

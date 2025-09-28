@@ -426,6 +426,7 @@ Fonts vary widely in their Unicode coverage, i.e. they usually miss glyphs for m
 > `^[]7771;?;`_char0_`;`_char1_...`^G`
 
 Characters shall be specified with their decimal Unicode codepoint. Any number of characters can be given. Mintty replies with the same sequence, except that the question mark is replaced with an exclamation mark and that codes for characters that the current font does not have a glyph for are omitted.
+The function only works for characters in the Unicode BMP, smaller than U+10000.
 
 
 ## Wide characters ##
@@ -944,4 +945,27 @@ Mintty supports the following DEC, xterm and mintty Media Copy sequences:
 | `^[[?4i`     | end output to printer           |
 | `^[[10i`     | save screen as HTML             |
 | `^[[12i`     | save screen as PNG image        |
+
+
+## Display speed ##
+
+Mintty supports the DECSCS sequence to select the communication speed, 
+extended by two default settings, either unrestricted speed or 
+the pre-configured speed (option Baud):
+
+| **sequence** | **effect**                |
+|:-------------|:--------------------------|
+| `^[[2*r`     | reset to configured speed |
+| `^[[2;0*r`   | unlimited speed |
+| `^[[2;1*r`   | 300 baud        |
+| `^[[2;2*r`   | 600 baud        |
+| `^[[2;3*r`   | 1200 baud       |
+| `^[[2;4*r`   | 2400 baud       |
+| `^[[2;5*r`   | 4800 baud       |
+| `^[[2;6*r`   | 9600 baud       |
+| `^[[2;7*r`   | 19200 baud      |
+| `^[[2;8*r`   | 38400 baud      |
+| `^[[2;9*r`   | 57600 baud      |
+| `^[[2;10*r`  | 76800 baud      |
+| `^[[2;11*r`  | 115200 baud     |
 
