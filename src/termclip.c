@@ -219,6 +219,10 @@ get_selection(bool attrs, pos start, pos end, bool rect, bool allinline, bool wi
       }
       start.x++;
     }
+    if (cfg.export_html_unwrapped && (line->lattr & LATTR_WRAPPED)) {
+      // join auto-wrapped lines for HTML export (#1336)
+      nl = false;
+    }
     if (nl) {
       clip_addchar(buf, '\r', 0, false, hint);
       // mark lineend with line attributes, particularly double-width/height
@@ -652,7 +656,7 @@ term_cmd(char * cmd)
 #include "winpriv.h"  // PADDING
 
 static char *
-term_create_html(FILE * hf, int level)
+term_create_html(bool all, FILE * hf, int level)
 {
   char * hbuf = hf ? 0 : strdup("");
   size_t hbuf_len = 0;
@@ -686,6 +690,12 @@ term_create_html(FILE * hf, int level)
   if (!term.selected) {
     start = (pos){term.disptop, 0, 0, 0, false};
     end = (pos){term.disptop + term.rows - 1, term.cols, 0, 0, false};
+    rect = false;
+  }
+  if (all) {
+    // mark all, like term_select_all() without term_copy()
+    start = (pos){-sblines(), 0, 0, 0, false};
+    end = (pos){term_last_nonempty_line(), term.cols, 0, 0, true};
     rect = false;
   }
 
@@ -811,7 +821,7 @@ term_create_html(FILE * hf, int level)
 #ifdef float_left
   // float needed here to avoid placement left of previous text (Thunderbird)
   // this cannot be reproduced anymore; dropped (#900)
-  if (level >= 3) {
+  if (level >= 3)
     hprintf(hf, "    float: left;\n");
 #endif
   hprintf(hf, "  }\n");
@@ -822,6 +832,15 @@ term_create_html(FILE * hf, int level)
   hprintf(hf, "  .ul { text-decoration-line: underline }\n");
   hprintf(hf, "  .st { text-decoration-line: line-through }\n");
   hprintf(hf, "  .lu { text-decoration-line: line-through underline }\n");
+  hprintf(hf, "  @keyframes blink { 0%% { opacity: 1; } 50%% { opacity: 0; } }\n");
+  hprintf(hf, "  [name=blink], [name=rapid] {\n");
+  hprintf(hf, "    animation-name: blink;\n");
+  hprintf(hf, "    animation-iteration-count: infinite;\n");
+  hprintf(hf, "    animation-timing-function: step-end;\n");
+  hprintf(hf, "  }\n");
+  hprintf(hf, "  [name=blink] { animation-duration: 1.0s; }\n");
+  hprintf(hf, "  [name=rapid] { animation-duration: 0.6s; }\n");
+
   if (bold_colour != (colour)-1)
     hprintf(hf, "  .bold-color { color: #%02X%02X%02X }\n",
             red(bold_colour), green(bold_colour), blue(bold_colour));
@@ -851,6 +870,9 @@ term_create_html(FILE * hf, int level)
   }
 
   hprintf(hf, "  </style>\n");
+
+#if 0
+#warning blinking is now implemented via css
   hprintf(hf, "  <script>\n");
   hprintf(hf, "  var b1 = 500; var b2 = 300;\n");
   hprintf(hf, "  function visib (tag, state, timeout) {\n");
@@ -867,6 +889,8 @@ term_create_html(FILE * hf, int level)
   hprintf(hf, "    window.setTimeout ('visib (\"rapid\", 0, b2)', b2);\n");
   hprintf(hf, "  }\n");
   hprintf(hf, "  </script>\n");
+#endif
+
   hprintf(hf, "</head>\n\n");
   hprintf(hf, "<body class=mintty onload='setup();'>\n");
   //hprintf(hf, "  <table border=0 cellpadding=0 cellspacing=0><tr><td>\n");
@@ -1128,7 +1152,7 @@ term_create_html(FILE * hf, int level)
       }
 
       if (ca->attr & ATTR_INVISIBLE)
-        add_style("visibility: hidden;");
+        add_style("opacity: 0;");
       else {
         // add JavaScript triggers
         if (ca->attr & ATTR_BLINK2)
@@ -1245,11 +1269,11 @@ term_create_html(FILE * hf, int level)
 char *
 term_get_html(int level)
 {
-  return term_create_html(0, level);
+  return term_create_html(false, 0, level);
 }
 
 void
-term_export_html(bool do_open)
+term_export_html(bool all, bool do_open)
 {
   struct timeval now;
   gettimeofday(& now, 0);
@@ -1266,7 +1290,7 @@ term_export_html(bool do_open)
     return;
   }
 
-  term_create_html(hf, 3);
+  term_create_html(all, hf, 3);
 
   fclose(hf);  // implies close(hfd);
 
